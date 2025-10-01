@@ -197,7 +197,12 @@
       <artifactId>beam-sdks-java-core</artifactId>
       <version>${beam.version}</version>
     </dependency>
-
+    <dependency>
+          <groupId>org.apache.beam</groupId>
+          <artifactId>beam-runners-portability-java</artifactId>
+          <version>${beam.version}</version>
+          <scope>runtime</scope>
+    </dependency>
 
     <!-- Adds a dependency on the Beam Google Cloud Platform IO module. -->
     <dependency>
@@ -340,3 +345,4 @@
     </dependencies>
   </dependencyManagement>
 </project>
+
