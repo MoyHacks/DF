@@ -156,21 +156,7 @@
       </dependencies>
     </profile>
 
-   <profile>
-      <id>portable-runner</id>
-      <activation>
-        <activeByDefault>true</activeByDefault>
-      </activation>
-      <!-- Makes the PortableRunner available when running a pipeline. -->
-      <dependencies>
-        <dependency>
-          <groupId>org.apache.beam</groupId>
-          <artifactId>beam-runners-portability-java</artifactId>
-          <version>${beam.version}</version>
-          <scope>runtime</scope>
-        </dependency>
-      </dependencies>
-    </profile>
+
 
     <profile>
       <id>dataflow-runner</id>
@@ -197,12 +183,7 @@
       <artifactId>beam-sdks-java-core</artifactId>
       <version>${beam.version}</version>
     </dependency>
-    <dependency>
-          <groupId>org.apache.beam</groupId>
-          <artifactId>beam-runners-portability-java</artifactId>
-          <version>${beam.version}</version>
-          <scope>runtime</scope>
-    </dependency>
+
 
     <!-- Adds a dependency on the Beam Google Cloud Platform IO module. -->
     <dependency>
@@ -345,4 +326,5 @@
     </dependencies>
   </dependencyManagement>
 </project>
+
 
