@@ -1,0 +1,129 @@
+package org.coppel.omnicanal.utils;
+
+
+
+import org.coppel.omnicanal.dto.message.CustomerOrder;
+import org.coppel.omnicanal.dto.message.CustomerOrderLineItem;
+import org.coppel.omnicanal.dto.orderupdate.*;
+import org.coppel.omnicanal.dto.statuscatalog.StatusDetail;
+import org.jetbrains.annotations.NotNull;
+
+import java.time.ZoneId;
+import java.time.ZonedDateTime;
+import java.time.format.DateTimeFormatter;
+import java.util.*;
+import java.util.stream.Collectors;
+
+public class ActualizarStatusRequestBuilder {
+
+    CustomerOrder order;
+    Map<String, StatusDetail>  statusCatalog;
+    private static final Set<Integer> STATUS_CON_EVENTO = Set.of(1, 3, 6, 20, 22, 40, 41);
+    private static final DateTimeFormatter DATE_FORMATTER = DateTimeFormatter.ofPattern("MMM d, yyyy, h:mm:ss a", Locale.US);
+
+    public ActualizarStatusRequestBuilder withData(CustomerOrder order,Map<String, StatusDetail>  statusCatalog) {
+        this.order = order;
+        this.statusCatalog = statusCatalog;
+        return this;
+    }
+
+    public ActualizarStatusPedidoRefactorRequest build() {
+        StatusDetail statusDetail = statusCatalog.get(String.valueOf(this.order.getCustomerOrderStateCode().getCode()));
+        ActualizarStatusPedidoRefactorRequest request = new ActualizarStatusPedidoRefactorRequest();
+        request.setCustomerOrderID(this.order.getCustomerOrderID());
+        request.setCustomerID(Long.valueOf(this.order.getCustomerID()));
+        request.setStatusCode(statusDetail.getStatus());
+        request.setTypeUpdate(2);
+        request.setCustomerOrderLineItems(getCustomerOrderLineItems());
+        CustomerOrdersStatusUpdateRequest orderstatus = new CustomerOrdersStatusUpdateRequest();
+            GeneralRequest generalRequest = new GeneralRequest((long) this.order.getCustomerOrderStateCode().getCode(),(long)0);
+            orderstatus.setCustomerOrder(new CustomerOrderRequest(this.order.getCustomerOrderID(),generalRequest));
+            orderstatus.setEventDetail( getEventDetail(statusDetail));
+            orderstatus.setEventCatalog( new EventCatalogRequest(1,"di-com-statusUpdate","Update Status","OMS","1.0",fechaActual()));
+            orderstatus.setEventDetailLineItem(getEventDetailLineItems());
+        request.setCustomerOrdersStatusUpdate(orderstatus);
+        return request;
+    }
+
+    private EventDetailRequest getEventDetail(StatusDetail statusDetail){
+        CustomerOrderStateRequest state = new CustomerOrderStateRequest((long)statusDetail.getStatus(),statusDetail.getStatusName(),statusDetail.getStatusTracking());
+       return new EventDetailRequest(state);
+    }
+
+    private EventDetailLineItem getEventDetailLineItems(){
+        List<CustomerOrderLineItemDTO>  data = this.order.getCustomerOrderLineItem()
+                .stream()
+                .map(lineItem -> {
+                    CustomerOrderLineItemDTO item = new CustomerOrderLineItemDTO();
+                    item.setItemID(getPartNumber(lineItem.getSku()));
+                    item.setCustomerOrderItemID(Long.parseLong(lineItem.getSku()));
+                    item.setItemStatus(getItemStates(lineItem));
+                    item.setItemQuantity(lineItem.getOrderedItemQuantity());
+                    return item;
+                })
+                .collect(Collectors.toList());
+
+        return new EventDetailLineItem(data);
+    }
+
+    private List<ItemStatus> getItemStates (CustomerOrderLineItem lineItem){
+        List<ItemStatus> itemsStatus = new ArrayList<>();
+        StatusDetail statusDetailCatalog = statusCatalog.get(String.valueOf(lineItem.getCustomerOrderLineItemStateCode().getCode()));
+        CustomerOrderItemState itemState = new CustomerOrderItemState(statusDetailCatalog.getStatusProduct(),statusDetailCatalog.getStatusNameProduct(),statusDetailCatalog.getStatusTracking());
+        ItemStatus itemstatus = new ItemStatus(itemState,lineItem.getOrderedItemQuantity());
+        itemsStatus.add(itemstatus);
+        return itemsStatus;
+    }
+
+
+    @NotNull
+    private List<CustomerOrderLineItems> getCustomerOrderLineItems() {
+        return this.order.getCustomerOrderLineItem()
+                .stream()
+                .map(lineItem -> {
+                    CustomerOrderLineItems item = new CustomerOrderLineItems();
+                    item.setAreaItem(getArea(lineItem.getSku()));
+                    item.setCodeRegisterID(lineItem.getCustomerOrderLineItemSequenceNumber());
+                    item.setSizeItem(getSize(lineItem.getSku()));
+                    item.setCustomerOrderItemID(getSku(lineItem.getSku()));
+                    item.setQuantityItem(lineItem.getOrderedItemQuantity());
+                    item.setStatusCodeItem(statusCatalog.get(String.valueOf(lineItem.getCustomerOrderLineItemStateCode().getCode())).getStatusProduct());
+                    return item;
+                })
+                .collect(Collectors.toList());
+    }
+
+    public String fechaActual(){
+        return ZonedDateTime.now(ZoneId.systemDefault()).format(DATE_FORMATTER);
+    }
+
+    public int getArea(String sku){
+        return switch (sku.length()) {
+            case 6 -> 3;
+            case 9 -> 2;
+            default -> 99;
+        };
+    }
+
+    public int getSize(String sku){
+        if(sku.length() > 6){
+            return Integer.parseInt(sku.substring(sku.length() - 3));
+        }
+        return 0;
+    }
+
+    public Long getSku(String sku){
+        if (sku.length() > 6){
+            return Long.parseLong(sku.substring(0, 6));
+        }
+        return Long.parseLong(sku);
+    }
+
+    public String getPartNumber(String sku){
+        if(sku.length() > 6){
+            return "IR-"+sku.substring(0,6)+"2-"+sku.substring(sku.length()-3);
+        }
+        return "IM-"+sku+"3-0";
+    }
+
+}
