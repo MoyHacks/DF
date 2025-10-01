@@ -122,7 +122,7 @@ public class PubSubToApiPipeline {
         PubSubToApiOptions options = PipelineOptionsFactory.fromArgs(args)
                 .withValidation()
                 .as(PubSubToApiOptions.class);
-        options.setRunner(org.apache.beam.runners.portability.PortableRunner.class);
+        
         String stringCatalog = loadCatalogFromFile(options.getStatusCatalog());
         Map<String, StatusDetail> catalog = parsearCatalog(stringCatalog);
         // 1. Cargar credenciales desde Secret Manager
@@ -199,4 +199,5 @@ public class PubSubToApiPipeline {
     }
 
 }
+
 
