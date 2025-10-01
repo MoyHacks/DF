@@ -24,6 +24,7 @@ WORKDIR /dataflow/template
 COPY --from=builder /app/target/*-bundled-*.jar app.jar
 
 # Variables obligatorias para Dataflow Flex Template
-ENV FLEX_TEMPLATE_JAVA_MAIN_CLASS="org.coppel.omnicanal.PubSubToApiPipeline"
+ENV FLEX_TEMPLATE_JAVA_MAIN_CLASS="org.coppel.PubSubToApiPipeline"
 ENV FLEX_TEMPLATE_JAVA_CLASSPATH="/dataflow/template/app.jar"
+
 
