@@ -22,7 +22,9 @@ import org.coppel.omnicanal.dto.statuscatalog.StatusDetail;
 import org.coppel.omnicanal.parser.ParseJsonToDtoFn;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
+import com.google.cloud.storage.Blob;
+import com.google.cloud.storage.Storage;
+import com.google.cloud.storage.StorageOptions;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -190,14 +192,29 @@ public class PubSubToApiPipeline {
             return Collections.emptyMap();
         }
     }
-    private static String loadCatalogFromFile(String filePath) {
+   private static String loadCatalogFromFile(String filePath) {
         try {
-            return new String(Files.readAllBytes(Paths.get(filePath)), StandardCharsets.UTF_8);
+            if (filePath.startsWith("gs://")) {
+                String withoutPrefix = filePath.substring(5); // quitar "gs://"
+                int slashIndex = withoutPrefix.indexOf('/');
+                String bucket = withoutPrefix.substring(0, slashIndex);
+                String object = withoutPrefix.substring(slashIndex + 1);
+
+                Storage storage = StorageOptions.getDefaultInstance().getService();
+                Blob blob = storage.get(bucket, object);
+                if (blob == null) {
+                    throw new RuntimeException("El archivo no existe en GCS: " + filePath);
+                }
+                return new String(blob.getContent(), StandardCharsets.UTF_8);
+            } else {
+                return new String(Files.readAllBytes(Paths.get(filePath)), StandardCharsets.UTF_8);
+            }
         } catch (IOException e) {
-            throw new RuntimeException("No se pudo leer el archivo de catálogo: " + filePath, e);
+            throw new RuntimeException("No se pudo leer el catálogo desde: " + filePath, e);
         }
     }
 
 }
+
 
 
