@@ -181,7 +181,7 @@ public class PubSubToApiPipeline {
         }));
 
         PipelineResult result = p.run();
-        result.waitUntilFinish();
+       
     }
 
     public static Map<String, StatusDetail> parsearCatalog(String jsonCatalog) {
@@ -215,6 +215,7 @@ public class PubSubToApiPipeline {
     }
 
 }
+
 
 
 
