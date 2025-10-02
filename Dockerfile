@@ -18,6 +18,7 @@ COPY --from=builder /app/target/di-com-statusupdate-bundled-0.1.jar app.jar
 # Variables requeridas por Dataflow Flex
 ENV FLEX_TEMPLATE_JAVA_MAIN_CLASS="org.coppel.omnicanal.PubSubToApiPipeline"
 ENV FLEX_TEMPLATE_JAVA_CLASSPATH="/dataflow/template/app.jar"
+#fine
 
 
 
