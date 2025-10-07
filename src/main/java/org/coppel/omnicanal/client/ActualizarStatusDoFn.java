@@ -1,19 +1,19 @@
 package org.coppel.omnicanal.client;
 
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.beam.sdk.transforms.DoFn;
 import org.coppel.omnicanal.dto.orderupdate.ActualizarStatusPedidoRefactorRequest;
 import org.coppel.omnicanal.dto.partyidentity.TokenResponse;
-import org.coppel.omnicanal.utils.Constantes;
+import org.coppel.omnicanal.exceptions.TransientHttpException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.http.HttpStatusCode;
 import org.springframework.http.MediaType;
-
 import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.reactive.function.client.WebClientRequestException;
-import reactor.core.publisher.Mono;
 import reactor.util.retry.Retry;
-
 import java.time.Duration;
 import java.time.Instant;
 import java.util.concurrent.TimeoutException;
@@ -57,10 +57,12 @@ public class ActualizarStatusDoFn extends DoFn<ActualizarStatusPedidoRefactorReq
         webClient = WebClient.builder().build();
 
         retrySpec = Retry.backoff(maxRetries, Duration.ofSeconds(1))
-                .filter(throwable -> throwable instanceof WebClientRequestException || throwable instanceof TimeoutException)
-                .onRetryExhaustedThrow((retryBackoffSpec, retrySignal) ->
-                        new Exception("El servicio de actualización no respondió después de varios reintentos. "+ "503 "+ Constantes.BS_COM_ORDER_UPDATE)
-                );
+                .filter(throwable ->
+                        throwable instanceof TransientHttpException ||
+                                throwable instanceof TimeoutException)
+                .onRetryExhaustedThrow((spec, signal) ->
+                        new Exception("El servicio no respondió tras varios reintentos."));
+
 
         this.partyIdentityClient = new PartyIdentityClient(this.webClient,this.tokenApiUrl,this.clientId,this.clientSecret,this.grantType,this.scope);
         getValidToken();
@@ -94,18 +96,72 @@ public class ActualizarStatusDoFn extends DoFn<ActualizarStatusPedidoRefactorReq
                     .accept(MediaType.APPLICATION_JSON)
                     .bodyValue(requestBody)
                     .exchangeToMono(response -> {
-                        if (response.statusCode().isError()) {
-                            return response.bodyToMono(String.class)
-                                    .flatMap(errorBody -> Mono.just(ResultadoActualizacion.fallido(
-                                            "El servicio respondió con error: " + errorBody,
-                                            String.valueOf(response.statusCode().value()),
-                                            requestBody
-                                    )));
-                        } else {
-                            return response.bodyToMono(String.class)
-                                    .map(successBody -> ResultadoActualizacion.exitoso(successBody, requestBody));
-                        }
+                        HttpStatusCode status = response.statusCode();
+
+                        return response.bodyToMono(String.class)
+                                .doOnNext(body -> LOG.info("Body recibido del servicio: {}", body))
+                                .map(body -> {
+                                    ObjectMapper mapper = new ObjectMapper();
+                                    try {
+                                        JsonNode root = mapper.readTree(body);
+                                        JsonNode metaNode = root.path("Response").path("meta");
+                                        if (metaNode.isMissingNode() || metaNode.isNull()) {
+                                            metaNode = root.path("meta");
+                                        }
+
+                                        if (metaNode.isMissingNode() || metaNode.isNull()) {
+                                            return ResultadoActualizacion.fallido(
+                                                    "Respuesta sin campo meta",
+                                                    "999",
+                                                    requestBody);
+                                        }
+
+                                        int codeHttp = metaNode.path("codeHttp").asInt();
+                                        int codeService = metaNode.path("codeService").asInt();
+                                        String msg = metaNode.path("messageService").asText();
+
+                                        // ✅ Caso 1: Éxito total
+                                        if (codeHttp == 200 && codeService == 0) {
+                                            LOG.info("✅ Éxito: {}", msg);
+                                            return ResultadoActualizacion.exitoso(msg, requestBody);
+                                        }
+
+                                        if (codeHttp == 404 || codeService == 104) {
+                                            LOG.info("️Recurso no encontrado 404: {}", msg);
+                                            return ResultadoActualizacion.fallido(msg, String.valueOf(codeService), requestBody);
+                                        }
+
+
+                                        if (codeHttp >= 400 && codeHttp < 500) {
+                                            LOG.warn("Error controlado ({}): {}", codeService, msg);
+                                            return ResultadoActualizacion.fallido(msg, String.valueOf(codeService), requestBody);
+                                        }
+
+
+                                        if (codeHttp >= 500 || codeHttp == 429) {
+                                            LOG.error("🔁 Error recuperable ({}): {}", codeHttp, msg);
+                                            throw new TransientHttpException(
+                                                    "Error recuperable: " + codeHttp + " - " + msg);
+                                        }
+
+                                        LOG.warn(" Respuesta inesperada: {}", body);
+                                        return ResultadoActualizacion.fallido(
+                                                "Respuesta inesperada: " + codeHttp + " - " + msg,
+                                                String.valueOf(codeHttp),
+                                                requestBody);
+
+                                    } catch (TransientHttpException e) {
+                                        throw e;
+                                    } catch (Exception e) {
+                                        LOG.error("Error parseando respuesta JSON: {}", e.getMessage());
+                                        return ResultadoActualizacion.fallido(
+                                                "Error al parsear la respuesta del servicio",
+                                                "998",
+                                                requestBody);
+                                    }
+                                });
                     })
+
                     .timeout(Duration.ofMillis(timeoutMs))
                     .retryWhen(retrySpec)
                     .block();
@@ -114,12 +170,12 @@ public class ActualizarStatusDoFn extends DoFn<ActualizarStatusPedidoRefactorReq
 
         } catch (WebClientRequestException ex) {
 
-            LOG.error("Error de conexión FATAL para el pedido: {}.", requestBody.getCustomerOrderID(), ex);
+            LOG.error("Error de conexión  para el pedido: {}.", requestBody.getCustomerOrderID(), ex);
             throw new RuntimeException("Error de infraestructura irrecuperable al contactar el endpoint. Causa: " + ex.getMessage(), ex);
 
         } catch (Exception e) {
 
-            LOG.error("Error inesperado FATAL procesando el pedido: {}", requestBody.getCustomerOrderID(), e);
+            LOG.error("Error inesperado  procesando el pedido: {}", requestBody.getCustomerOrderID(), e);
             throw new RuntimeException("Error inesperado en el DoFn. Causa: " + e.getMessage(), e);
         }
     }
