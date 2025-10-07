@@ -38,9 +38,10 @@ jobs:
 
       - name: Build and Push Docker Image
         run: |
-          IMAGE_NAME=us-central1-docker.pkg.dev/${{ secrets.GCP_PROJECT }}/docker-repo/dataflow
-          docker build -t $IMAGE_NAME .
-          docker push $IMAGE_NAME
+          IMAGE_BASE=us-central1-docker.pkg.dev/${{ secrets.GCP_PROJECT }}/docker-repo/dataflow
+          TAG=${{ github.sha }}
+          docker build -t $IMAGE_BASE:$TAG -t $IMAGE_BASE:latest .
+          docker push $IMAGE_BASE --all-tags
 
       - name: Success message
         run: echo "✅ Build and push complete!"
