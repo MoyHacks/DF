@@ -35,6 +35,7 @@ public class ParseJsonToDtoFn extends DoFn<String, ActualizarStatusPedidoRefacto
                     jsonMessage,
                     CustomerOrder.class
             );
+            LOG.info("Mensaje:"+dto);
             ActualizarStatusPedidoRefactorRequest request = new ActualizarStatusRequestBuilder().withData(dto, statusCatalog).build();
             c.output(request);
 

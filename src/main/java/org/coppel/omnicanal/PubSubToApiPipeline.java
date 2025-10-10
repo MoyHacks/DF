@@ -11,10 +11,10 @@ import org.apache.beam.sdk.PipelineResult;
 import org.apache.beam.sdk.extensions.gcp.options.GcpOptions;
 import org.apache.beam.sdk.io.gcp.pubsub.PubsubIO;
 import org.apache.beam.sdk.options.*;
-import org.apache.beam.sdk.transforms.DoFn;
-import org.apache.beam.sdk.transforms.Filter;
-import org.apache.beam.sdk.transforms.ParDo;
+import org.apache.beam.sdk.transforms.*;
 import org.apache.beam.sdk.values.PCollection;
+import org.apache.beam.sdk.values.PCollectionList;
+import org.apache.beam.sdk.values.TypeDescriptor;
 import org.coppel.omnicanal.client.ActualizarStatusDoFn;
 import org.coppel.omnicanal.client.ResultadoActualizacion;
 import org.coppel.omnicanal.dto.orderupdate.ActualizarStatusPedidoRefactorRequest;
@@ -124,7 +124,7 @@ public class PubSubToApiPipeline {
         PubSubToApiOptions options = PipelineOptionsFactory.fromArgs(args)
                 .withValidation()
                 .as(PubSubToApiOptions.class);
-        
+
         String stringCatalog = loadCatalogFromFile(options.getStatusCatalog());
         Map<String, StatusDetail> catalog = parsearCatalog(stringCatalog);
         // 1. Cargar credenciales desde Secret Manager
@@ -146,8 +146,33 @@ public class PubSubToApiPipeline {
                         .apply("2. Convertir JSON a DTO",
                                 ParDo.of(new ParseJsonToDtoFn(catalog)));
 
+        PCollection<ActualizarStatusPedidoRefactorRequest> validos =
+                dtos.apply("Filtrar requests válidos",
+                        Filter.by(req ->
+                                req != null &&
+                                        req.getCustomerOrderLineItems() != null &&
+                                        !req.getCustomerOrderLineItems().isEmpty()
+                        ));
+
+
+        PCollection<ResultadoActualizacion> sinRopa =
+                dtos.apply("Filtrar requests sin ropa",
+                                Filter.by(req ->
+                                        req == null ||
+                                                req.getCustomerOrderLineItems() == null ||
+                                                req.getCustomerOrderLineItems().isEmpty()
+                                ))
+                        .apply("Mapear a ResultadoActualizacion",
+                                MapElements.into(TypeDescriptor.of(ResultadoActualizacion.class))
+                                        .via(req ->
+                                                ResultadoActualizacion.fallido(
+                                                        "Orden sin artículos de ropa",
+                                                        "NO_ROPA",
+                                                        req
+                                                )));
+
         PCollection<ResultadoActualizacion> resultados =
-                dtos.apply("3. Llamar API de Actualización",
+                validos.apply("3. Llamar API de Actualización",
                         ParDo.of(new ActualizarStatusDoFn(
                                 options.getApiUrl(),
                                 options.getApiTimeout(),
@@ -162,26 +187,32 @@ public class PubSubToApiPipeline {
         PCollection<ResultadoActualizacion> exitosos = resultados.apply("4a. Filtrar Éxitos",
                 Filter.by(ResultadoActualizacion::isExito));
 
-        PCollection<ResultadoActualizacion> fallidos = resultados.apply("4b. Filtrar Fallos",
-                Filter.by(r -> !r.isExito()));
+        PCollection<ResultadoActualizacion> fallidos = PCollectionList
+                .of(sinRopa)
+                .and(resultados.apply("4b. Filtrar Fallos", Filter.by(r -> !r.isExito())))
+                .apply("Unir fallidos", Flatten.pCollections());
 
         exitosos.apply("Log Éxitos", ParDo.of(new DoFn<ResultadoActualizacion, Void>() {
             @ProcessElement
             public void processElement(ProcessContext c) {
-                LOG.info("ÉXITO: " + c.element().getRequestOriginal().getCustomerOrderID());
+                LOG.info("Pedido {} procesado correctamente.",
+                        c.element().getRequestOriginal().getCustomerOrderID());
             }
         }));
 
         fallidos.apply("Log Fallos", ParDo.of(new DoFn<ResultadoActualizacion, Void>() {
             @ProcessElement
             public void processElement(ProcessContext c) {
-                LOG.warn("FALLO: " + c.element().getMensajeError()
-                        + " para el pedido: " + c.element().getRequestOriginal().getCustomerOrderID());
+                LOG.warn("FALLO: {} - Pedido {}",
+                        c.element().getMensajeError(),
+                        c.element().getRequestOriginal() != null
+                                ? c.element().getRequestOriginal().getCustomerOrderID()
+                                : "desconocido");
             }
         }));
 
         PipelineResult result = p.run();
-       
+       // result.waitUntilFinish();
     }
 
     public static Map<String, StatusDetail> parsearCatalog(String jsonCatalog) {
