@@ -10,6 +10,7 @@ import org.apache.beam.sdk.Pipeline;
 import org.apache.beam.sdk.PipelineResult;
 import org.apache.beam.sdk.extensions.gcp.options.GcpOptions;
 import org.apache.beam.sdk.io.gcp.pubsub.PubsubIO;
+import org.apache.beam.sdk.io.gcp.pubsub.PubsubOptions;
 import org.apache.beam.sdk.options.*;
 import org.apache.beam.sdk.transforms.*;
 import org.apache.beam.sdk.values.PCollection;
@@ -125,6 +126,7 @@ public class PubSubToApiPipeline {
                 .withValidation()
                 .as(PubSubToApiOptions.class);
 
+
         String stringCatalog = loadCatalogFromFile(options.getStatusCatalog());
         Map<String, StatusDetail> catalog = parsearCatalog(stringCatalog);
         // 1. Cargar credenciales desde Secret Manager
@@ -133,9 +135,10 @@ public class PubSubToApiPipeline {
                 options.getApiSecretName(),
                 "latest"
         );
-
-        options.as(GcpOptions.class).setGcpCredential(creds);
         LOG.info("Credenciales personalizadas cargadas desde Secret Manager.");
+        PubsubOptions pubsubOptions= options.as(PubsubOptions.class);
+        pubsubOptions.setGcpCredential(creds);
+
 
         Pipeline p = Pipeline.create(options);
 

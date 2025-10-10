@@ -202,7 +202,7 @@
     <dependency>
       <groupId>org.springframework</groupId>
       <artifactId>spring-webflux</artifactId>
-      <version>6.1.14</version>
+      <version>6.2.11</version>
     </dependency>
 
     <dependency>
@@ -228,18 +228,6 @@
     <dependency>
       <groupId>com.google.http-client</groupId>
       <artifactId>google-http-client</artifactId>
-      <exclusions>
-        <exclusion>
-          <groupId>com.google.guava</groupId>
-          <artifactId>guava-jdk5</artifactId>
-        </exclusion>
-      </exclusions>
-    </dependency>
-
-    <dependency>
-      <groupId>com.google.apis</groupId>
-      <artifactId>google-api-services-pubsub</artifactId>
-      <version>${pubsub.version}</version>
       <exclusions>
         <exclusion>
           <groupId>com.google.guava</groupId>
