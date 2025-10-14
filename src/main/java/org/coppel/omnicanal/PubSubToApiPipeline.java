@@ -69,26 +69,6 @@ public class PubSubToApiPipeline {
         String getTokenApiUrl();
         void setTokenApiUrl(String value);
 
-        @Description("El Client ID para la autenticación del token")
-        @Validation.Required
-        String getTokenClientId();
-        void setTokenClientId(String value);
-
-        @Description("Secret party Identity")
-        @Validation.Required
-        String getTokenClientSecret();
-        void setTokenClientSecret(String value);
-
-        @Description("Grant type party Identity")
-        @Validation.Required
-        String getTokenGrantType();
-        void setTokenGrantType(String value);
-
-        @Description("Scope party Identity")
-        @Validation.Required
-        String getTokenScope();
-        void setTokenScope(String value);
-
         @Description("Catálogo de estatus en formato String")
         @Validation.Required
         String getStatusCatalog();
@@ -100,44 +80,28 @@ public class PubSubToApiPipeline {
         try (SecretManagerServiceClient client = SecretManagerServiceClient.create()) {
             SecretVersionName secretVersionName = SecretVersionName.of(projectId, secretId, version);
             AccessSecretVersionResponse response = client.accessSecretVersion(secretVersionName);
+            LOG.info("Credenciales cargadas desde secretmanager");
             return response.getPayload().getData().toStringUtf8();
+
         } catch (Exception e) {
             throw new RuntimeException("Error al acceder al secreto " + secretId, e);
         }
     }
 
-    private static GoogleCredentials loadCredentialsFromSecret(String projectId, String secretId, String version) {
-        try {
-            String jsonKey = accessSecret(projectId, secretId, version);
-
-
-            new ObjectMapper().readValue(jsonKey, Map.class);
-
-            return GoogleCredentials.fromStream(
-                    new ByteArrayInputStream(jsonKey.getBytes(StandardCharsets.UTF_8))
-            );
-        } catch (Exception e) {
-            throw new RuntimeException("No se pudieron cargar credenciales desde el secreto " + secretId, e);
-        }
-    }
 
     public static void main(String[] args) {
         PubSubToApiOptions options = PipelineOptionsFactory.fromArgs(args)
                 .withValidation()
                 .as(PubSubToApiOptions.class);
-
-
         String stringCatalog = loadCatalogFromFile(options.getStatusCatalog());
         Map<String, StatusDetail> catalog = parsearCatalog(stringCatalog);
-        // 1. Cargar credenciales desde Secret Manager
-        GoogleCredentials creds = loadCredentialsFromSecret(
+
+        String creds = accessSecret(
                 options.getProject(),
                 options.getApiSecretName(),
                 "latest"
         );
-        LOG.info("Credenciales personalizadas cargadas desde Secret Manager.");
-        PubsubOptions pubsubOptions= options.as(PubsubOptions.class);
-        pubsubOptions.setGcpCredential(creds);
+        Map <String,String> token = loadToken(creds,options.getApiSecretName());
 
 
         Pipeline p = Pipeline.create(options);
@@ -181,10 +145,10 @@ public class PubSubToApiPipeline {
                                 options.getApiTimeout(),
                                 options.getApiRetries(),
                                 options.getTokenApiUrl(),
-                                options.getTokenClientId(),
-                                options.getTokenClientSecret(),
-                                options.getTokenGrantType(),
-                                options.getTokenScope()
+                                token.get("tokenClientId"),
+                                token.get("tokenClientSecret"),
+                                token.get("tokenGrantType"),
+                                token.get("tokenScope")
                         )));
 
         PCollection<ResultadoActualizacion> exitosos = resultados.apply("4a. Filtrar Éxitos",
@@ -215,7 +179,17 @@ public class PubSubToApiPipeline {
         }));
 
         PipelineResult result = p.run();
-       // result.waitUntilFinish();
+        result.waitUntilFinish();
+    }
+
+    public static Map<String,String> loadToken(String creds,String name){
+        Map<String,String> tokenConfig;
+        try {
+            tokenConfig = new ObjectMapper().readValue(creds, new TypeReference<Map<String, String>>() {});
+        } catch (IOException e) {
+            throw new RuntimeException("Error al parsear el JSON del secreto " + name, e);
+        }
+        return tokenConfig;
     }
 
     public static Map<String, StatusDetail> parsearCatalog(String jsonCatalog) {
@@ -226,10 +200,10 @@ public class PubSubToApiPipeline {
             return Collections.emptyMap();
         }
     }
-   private static String loadCatalogFromFile(String filePath) {
+    private static String loadCatalogFromFile(String filePath) {
         try {
             if (filePath.startsWith("gs://")) {
-                String withoutPrefix = filePath.substring(5); // quitar "gs://"
+                String withoutPrefix = filePath.substring(5);
                 int slashIndex = withoutPrefix.indexOf('/');
                 String bucket = withoutPrefix.substring(0, slashIndex);
                 String object = withoutPrefix.substring(slashIndex + 1);
@@ -248,8 +222,5 @@ public class PubSubToApiPipeline {
         }
     }
 
+
 }
-
-
-
-
