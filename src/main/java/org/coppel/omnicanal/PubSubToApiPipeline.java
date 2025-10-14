@@ -179,7 +179,7 @@ public class PubSubToApiPipeline {
         }));
 
         PipelineResult result = p.run();
-        result.waitUntilFinish();
+        //result.waitUntilFinish();
     }
 
     public static Map<String,String> loadToken(String creds,String name){
@@ -224,3 +224,4 @@ public class PubSubToApiPipeline {
 
 
 }
+
