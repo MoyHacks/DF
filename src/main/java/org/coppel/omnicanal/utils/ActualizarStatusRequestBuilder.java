@@ -18,7 +18,6 @@ public class ActualizarStatusRequestBuilder {
 
     CustomerOrder order;
     Map<String, StatusDetail>  statusCatalog;
-    private static final Set<Integer> STATUS_CON_EVENTO = Set.of(1, 3, 6, 20, 22, 40, 41);
     private static final DateTimeFormatter DATE_FORMATTER = DateTimeFormatter.ofPattern("MMM d, yyyy, h:mm:ss a", Locale.US);
 
     public ActualizarStatusRequestBuilder withData(CustomerOrder order,Map<String, StatusDetail>  statusCatalog) {
@@ -35,7 +34,6 @@ public class ActualizarStatusRequestBuilder {
             return request;
         }
         StatusDetail statusDetail = statusCatalog.get(String.valueOf(this.order.getCustomerOrderStateCode().getCode()));
-
         request.setCustomerOrderID(this.order.getCustomerOrderID());
         request.setCustomerID(Long.valueOf(this.order.getCustomerID()));
         request.setStatusCode(statusDetail.getStatus());
@@ -86,6 +84,7 @@ public class ActualizarStatusRequestBuilder {
     private List<CustomerOrderLineItems> getCustomerOrderLineItems() {
         return this.order.getCustomerOrderLineItem()
                 .stream()
+                .filter(lineItem -> lineItem.getSku().length() == 9)
                 .map(lineItem -> {
                     CustomerOrderLineItems item = new CustomerOrderLineItems();
                     item.setAreaItem(getArea(lineItem.getSku()));
@@ -131,6 +130,7 @@ public class ActualizarStatusRequestBuilder {
         }
         return "IM-"+sku+"3-0";
     }
+
     public void setNotValid(ActualizarStatusPedidoRefactorRequest request){
         request.setStatusCode(-1);
         request.setCustomerOrderID(this.order.getCustomerOrderID());
