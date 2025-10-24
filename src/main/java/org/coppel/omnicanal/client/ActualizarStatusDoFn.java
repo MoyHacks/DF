@@ -39,6 +39,7 @@ public class ActualizarStatusDoFn extends DoFn<ActualizarStatusPedidoRefactorReq
     private transient PartyIdentityClient partyIdentityClient;
     private transient String authToken;
     private transient Instant tokenExpiryTime;
+    private transient ObjectMapper mapper;
 
     public ActualizarStatusDoFn(String url, long timeoutMs, int maxRetries, String tokenApiUrl,String clientId,String clientSecret,String grantType,String scope) {
         this.url = url;
@@ -53,10 +54,11 @@ public class ActualizarStatusDoFn extends DoFn<ActualizarStatusPedidoRefactorReq
 
     @Setup
     public void setup() {
+        LOG.info("Inicializando instancia DoFn id={}", this.hashCode());
+        this.mapper = new ObjectMapper();
+        this.webClient = WebClient.builder().build();
 
-        webClient = WebClient.builder().build();
-
-        retrySpec = Retry.backoff(maxRetries, Duration.ofSeconds(1))
+        this.retrySpec = Retry.backoff(maxRetries, Duration.ofSeconds(1))
                 .filter(throwable ->
                         throwable instanceof TransientHttpException ||
                                 throwable instanceof TimeoutException)
@@ -64,18 +66,25 @@ public class ActualizarStatusDoFn extends DoFn<ActualizarStatusPedidoRefactorReq
                         new Exception("El servicio no respondió tras varios reintentos."));
 
 
-        this.partyIdentityClient = new PartyIdentityClient(this.webClient,this.tokenApiUrl,this.clientId,this.clientSecret,this.grantType,this.scope);
+        this.partyIdentityClient = new PartyIdentityClient(webClient,tokenApiUrl,clientId,clientSecret,grantType,scope);
         getValidToken();
     }
 
     private String getValidToken() {
-        synchronized (this) {
-            if (authToken == null || Instant.now().isAfter(tokenExpiryTime)) {
-                LOG.info("Token expirado. Solicitando uno nuevo...");
-                TokenResponse tokenResponse = partyIdentityClient.getNewToken();
-                this.authToken = tokenResponse.getAccess_token();
-                this.tokenExpiryTime = Instant.now().plusSeconds(tokenResponse.getExpires_in() - 60);
-                LOG.info("Nuevo token obtenido.");
+        Instant now = Instant.now();
+        if (authToken == null || tokenExpiryTime == null || now.isAfter(tokenExpiryTime)) {
+            synchronized (this) {
+                if (authToken == null || tokenExpiryTime == null || Instant.now().isAfter(tokenExpiryTime)) {
+                    LOG.info(" Instancia {} | Token expirado o inexistente. Solicitando uno nuevo...",this.hashCode());
+                    TokenResponse tokenResponse = partyIdentityClient.getNewToken();
+                    this.authToken = tokenResponse.getAccess_token();
+                    long ttl = Math.max(0, tokenResponse.getExpires_in() - 120);
+                    this.tokenExpiryTime = Instant.now().plusSeconds(ttl);
+
+                    LOG.info("Instancia {} | Nuevo token obtenido. Expira en {} segundos.",this.hashCode(), ttl);
+                } else {
+                    LOG.debug("Instancia {} | Token sigue siendo válido hasta {}",this.hashCode(), tokenExpiryTime);
+                }
             }
         }
         return this.authToken;
@@ -84,7 +93,7 @@ public class ActualizarStatusDoFn extends DoFn<ActualizarStatusPedidoRefactorReq
     @ProcessElement
     public void processElement(ProcessContext c) {
         ActualizarStatusPedidoRefactorRequest requestBody = c.element();
-        LOG.info("Procesando request: " + requestBody.toString());
+        LOG.info(" Instancia {} | Procesando request: {} " , this.hashCode(), requestBody.toString());
 
         try {
             authToken = getValidToken();
@@ -101,7 +110,6 @@ public class ActualizarStatusDoFn extends DoFn<ActualizarStatusPedidoRefactorReq
                         return response.bodyToMono(String.class)
                                 .doOnNext(body -> LOG.info("Body recibido del servicio: {}", body))
                                 .map(body -> {
-                                    ObjectMapper mapper = new ObjectMapper();
                                     try {
                                         JsonNode root = mapper.readTree(body);
                                         JsonNode metaNode = root.path("Response").path("meta");
@@ -120,9 +128,9 @@ public class ActualizarStatusDoFn extends DoFn<ActualizarStatusPedidoRefactorReq
                                         int codeService = metaNode.path("codeService").asInt();
                                         String msg = metaNode.path("messageService").asText();
 
-                                        // ✅ Caso 1: Éxito total
+
                                         if (codeHttp == 200 && codeService == 0) {
-                                            LOG.info("✅ Éxito: {}", msg);
+                                            LOG.info("Éxito: {}", msg);
                                             return ResultadoActualizacion.exitoso(msg, requestBody);
                                         }
 
@@ -139,7 +147,7 @@ public class ActualizarStatusDoFn extends DoFn<ActualizarStatusPedidoRefactorReq
 
 
                                         if (codeHttp >= 500 || codeHttp == 429) {
-                                            LOG.error("🔁 Error recuperable ({}): {}", codeHttp, msg);
+                                            LOG.error(" Error recuperable ({}): {}", codeHttp, msg);
                                             throw new TransientHttpException(
                                                     "Error recuperable: " + codeHttp + " - " + msg);
                                         }
@@ -174,7 +182,6 @@ public class ActualizarStatusDoFn extends DoFn<ActualizarStatusPedidoRefactorReq
             throw new RuntimeException("Error de infraestructura irrecuperable al contactar el endpoint. Causa: " + ex.getMessage(), ex);
 
         } catch (Exception e) {
-
             LOG.error("Error inesperado  procesando el pedido: {}", requestBody.getCustomerOrderID(), e);
             throw new RuntimeException("Error inesperado en el DoFn. Causa: " + e.getMessage(), e);
         }

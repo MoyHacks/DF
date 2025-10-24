@@ -2,15 +2,16 @@ package org.coppel.omnicanal;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.google.auth.oauth2.GoogleCredentials;
 import com.google.cloud.secretmanager.v1.AccessSecretVersionResponse;
 import com.google.cloud.secretmanager.v1.SecretManagerServiceClient;
 import com.google.cloud.secretmanager.v1.SecretVersionName;
+import com.google.cloud.storage.Blob;
+import com.google.cloud.storage.Storage;
+import com.google.cloud.storage.StorageOptions;
 import org.apache.beam.sdk.Pipeline;
 import org.apache.beam.sdk.PipelineResult;
 import org.apache.beam.sdk.extensions.gcp.options.GcpOptions;
 import org.apache.beam.sdk.io.gcp.pubsub.PubsubIO;
-import org.apache.beam.sdk.io.gcp.pubsub.PubsubOptions;
 import org.apache.beam.sdk.options.*;
 import org.apache.beam.sdk.transforms.*;
 import org.apache.beam.sdk.values.PCollection;
@@ -23,16 +24,13 @@ import org.coppel.omnicanal.dto.statuscatalog.StatusDetail;
 import org.coppel.omnicanal.parser.ParseJsonToDtoFn;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import com.google.cloud.storage.Blob;
-import com.google.cloud.storage.Storage;
-import com.google.cloud.storage.StorageOptions;
-import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.Collections;
 import java.util.Map;
+import java.util.Objects;
 
 
 public class PubSubToApiPipeline {
@@ -76,9 +74,9 @@ public class PubSubToApiPipeline {
 
     }
 
-    private static String accessSecret(String projectId, String secretId, String version) {
+    private static String accessSecret(String projectId, String secretId) {
         try (SecretManagerServiceClient client = SecretManagerServiceClient.create()) {
-            SecretVersionName secretVersionName = SecretVersionName.of(projectId, secretId, version);
+            SecretVersionName secretVersionName = SecretVersionName.of(projectId, secretId, "latest");
             AccessSecretVersionResponse response = client.accessSecretVersion(secretVersionName);
             LOG.info("Credenciales cargadas desde secretmanager");
             return response.getPayload().getData().toStringUtf8();
@@ -98,8 +96,7 @@ public class PubSubToApiPipeline {
 
         String creds = accessSecret(
                 options.getProject(),
-                options.getApiSecretName(),
-                "latest"
+                options.getApiSecretName()
         );
         Map <String,String> token = loadToken(creds,options.getApiSecretName());
 
@@ -152,18 +149,21 @@ public class PubSubToApiPipeline {
                         )));
 
         PCollection<ResultadoActualizacion> exitosos = resultados.apply("4a. Filtrar Éxitos",
-                Filter.by(ResultadoActualizacion::isExito));
+                Filter.by(resultadoActualizacion -> resultadoActualizacion != null && resultadoActualizacion.isExito()));
 
         PCollection<ResultadoActualizacion> fallidos = PCollectionList
                 .of(sinRopa)
-                .and(resultados.apply("4b. Filtrar Fallos", Filter.by(r -> !r.isExito())))
+                .and(resultados.apply("4b. Filtrar Fallos", Filter.by(r -> {
+                    assert r != null;
+                    return !r.isExito();
+                })))
                 .apply("Unir fallidos", Flatten.pCollections());
 
         exitosos.apply("Log Éxitos", ParDo.of(new DoFn<ResultadoActualizacion, Void>() {
             @ProcessElement
             public void processElement(ProcessContext c) {
                 LOG.info("Pedido {} procesado correctamente.",
-                        c.element().getRequestOriginal().getCustomerOrderID());
+                        Objects.requireNonNull(c.element()).getRequestOriginal().getCustomerOrderID());
             }
         }));
 
@@ -171,15 +171,18 @@ public class PubSubToApiPipeline {
             @ProcessElement
             public void processElement(ProcessContext c) {
                 LOG.warn("FALLO: {} - Pedido {}",
-                        c.element().getMensajeError(),
-                        c.element().getRequestOriginal() != null
-                                ? c.element().getRequestOriginal().getCustomerOrderID()
+                        Objects.requireNonNull(c.element()).getMensajeError(),
+                        Objects.requireNonNull(c.element()).getRequestOriginal() != null
+                                ? Objects.requireNonNull(c.element()).getRequestOriginal().getCustomerOrderID()
                                 : "desconocido");
             }
         }));
 
         PipelineResult result = p.run();
-        //result.waitUntilFinish();
+        //Condicion para que solo funcione en DirectRunner o local
+        if("DirectRunner".equalsIgnoreCase(options.getRunner().getSimpleName())  ) {
+            result.waitUntilFinish();
+        }
     }
 
     public static Map<String,String> loadToken(String creds,String name){
@@ -215,7 +218,7 @@ public class PubSubToApiPipeline {
                 }
                 return new String(blob.getContent(), StandardCharsets.UTF_8);
             } else {
-                return new String(Files.readAllBytes(Paths.get(filePath)), StandardCharsets.UTF_8);
+                return Files.readString(Paths.get(filePath));
             }
         } catch (IOException e) {
             throw new RuntimeException("No se pudo leer el catálogo desde: " + filePath, e);
@@ -224,4 +227,3 @@ public class PubSubToApiPipeline {
 
 
 }
-

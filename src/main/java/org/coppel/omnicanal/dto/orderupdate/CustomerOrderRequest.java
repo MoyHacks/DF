@@ -12,7 +12,7 @@ import java.io.Serializable;
 @NoArgsConstructor
 @Getter
 @Setter
-
+@ToString
 @DefaultCoder(AvroCoder.class)
 public class CustomerOrderRequest implements Serializable {
 

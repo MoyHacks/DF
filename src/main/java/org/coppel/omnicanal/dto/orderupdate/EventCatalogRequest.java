@@ -13,7 +13,7 @@ import java.io.Serializable;
 @AllArgsConstructor
 @Getter
 @Setter
-
+@ToString
 @DefaultCoder(AvroCoder.class)
 public class EventCatalogRequest  implements Serializable {
 
