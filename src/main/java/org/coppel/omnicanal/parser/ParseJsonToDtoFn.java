@@ -2,7 +2,6 @@ package org.coppel.omnicanal.parser;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.beam.sdk.transforms.DoFn;
-import org.coppel.omnicanal.client.ResultadoActualizacion;
 import org.coppel.omnicanal.dto.message.CustomerOrder;
 import org.coppel.omnicanal.dto.orderupdate.ActualizarStatusPedidoRefactorRequest;
 import org.coppel.omnicanal.dto.statuscatalog.StatusDetail;
@@ -37,7 +36,9 @@ public class ParseJsonToDtoFn extends DoFn<String, ActualizarStatusPedidoRefacto
                     jsonMessage,
                     CustomerOrder.class
             );
-            LOG.info("Message:"+dto);
+            if (LOG.isInfoEnabled()) {
+                LOG.info("Inicia Mensaje: {}", dto.toJson());
+            }
             ActualizarStatusPedidoRefactorRequest request = new ActualizarStatusRequestBuilder().withData(dto, statusCatalog).build();
             c.output(request);
         } catch (JsonProcessingException e) {

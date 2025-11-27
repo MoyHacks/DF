@@ -1,6 +1,5 @@
 package org.coppel.omnicanal.client;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.coppel.omnicanal.dto.partyidentity.TokenResponse;
 import org.springframework.http.MediaType;
 import org.springframework.web.reactive.function.BodyInserters;
@@ -20,7 +19,6 @@ public class PartyIdentityClient {
     private String clientSecret;
     private String grantType;
     private String scope;
-    private final ObjectMapper objectMapper = new ObjectMapper();
 
     public PartyIdentityClient(WebClient webClient,String tokenApiUrl,String clientId,String clientSecret,String grantType,String scope){
         this.webClient = webClient;

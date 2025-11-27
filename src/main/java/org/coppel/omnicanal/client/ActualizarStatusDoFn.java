@@ -6,10 +6,10 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.beam.sdk.transforms.DoFn;
 import org.coppel.omnicanal.dto.orderupdate.ActualizarStatusPedidoRefactorRequest;
 import org.coppel.omnicanal.dto.partyidentity.TokenResponse;
+import org.coppel.omnicanal.exceptions.OrderUpdateException;
 import org.coppel.omnicanal.exceptions.TransientHttpException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.http.HttpStatusCode;
 import org.springframework.http.MediaType;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.reactive.function.client.WebClientRequestException;
@@ -77,8 +77,8 @@ public class ActualizarStatusDoFn extends DoFn<ActualizarStatusPedidoRefactorReq
                 if (authToken == null || tokenExpiryTime == null || Instant.now().isAfter(tokenExpiryTime)) {
                     LOG.info(" Instancia {} | Token expirado o inexistente. Solicitando uno nuevo...",this.hashCode());
                     TokenResponse tokenResponse = partyIdentityClient.getNewToken();
-                    this.authToken = tokenResponse.getAccess_token();
-                    long ttl = Math.max(0, tokenResponse.getExpires_in() - 120);
+                    this.authToken = tokenResponse.getAccessT();
+                    long ttl = Math.max(0, tokenResponse.getExpiresIn() - 120);
                     this.tokenExpiryTime = Instant.now().plusSeconds(ttl);
 
                     LOG.info("Instancia {} | Nuevo token obtenido. Expira en {} segundos.",this.hashCode(), ttl);
@@ -93,97 +93,116 @@ public class ActualizarStatusDoFn extends DoFn<ActualizarStatusPedidoRefactorReq
     @ProcessElement
     public void processElement(ProcessContext c) {
         ActualizarStatusPedidoRefactorRequest requestBody = c.element();
-        LOG.info(" Instancia {} | Procesando request: {} " , this.hashCode(), requestBody.toString());
-
+        if (LOG.isInfoEnabled()) {
+            assert requestBody != null;
+            LOG.info("Instancia {} | Procesando request: {}", this.hashCode(), requestBody.toJson());
+        }
         try {
-            authToken = getValidToken();
-
-            ResultadoActualizacion resultado = webClient.post()
-                    .uri(url)
-                    .header("Authorization", "Bearer " + authToken)
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .accept(MediaType.APPLICATION_JSON)
-                    .bodyValue(requestBody)
-                    .exchangeToMono(response -> {
-                        HttpStatusCode status = response.statusCode();
-
-                        return response.bodyToMono(String.class)
-                                .doOnNext(body -> LOG.info("Body recibido del servicio: {}", body))
-                                .map(body -> {
-                                    try {
-                                        JsonNode root = mapper.readTree(body);
-                                        JsonNode metaNode = root.path("Response").path("meta");
-                                        if (metaNode.isMissingNode() || metaNode.isNull()) {
-                                            metaNode = root.path("meta");
-                                        }
-
-                                        if (metaNode.isMissingNode() || metaNode.isNull()) {
-                                            return ResultadoActualizacion.fallido(
-                                                    "Respuesta sin campo meta",
-                                                    "999",
-                                                    requestBody);
-                                        }
-
-                                        int codeHttp = metaNode.path("codeHttp").asInt();
-                                        int codeService = metaNode.path("codeService").asInt();
-                                        String msg = metaNode.path("messageService").asText();
-
-
-                                        if (codeHttp == 200 && codeService == 0) {
-                                            LOG.info("Éxito: {}", msg);
-                                            return ResultadoActualizacion.exitoso(msg, requestBody);
-                                        }
-
-                                        if (codeHttp == 404 || codeService == 104) {
-                                            LOG.info("️Recurso no encontrado 404: {}", msg);
-                                            return ResultadoActualizacion.fallido(msg, String.valueOf(codeService), requestBody);
-                                        }
-
-
-                                        if (codeHttp >= 400 && codeHttp < 500) {
-                                            LOG.warn("Error controlado ({}): {}", codeService, msg);
-                                            return ResultadoActualizacion.fallido(msg, String.valueOf(codeService), requestBody);
-                                        }
-
-
-                                        if (codeHttp >= 500 || codeHttp == 429) {
-                                            LOG.error(" Error recuperable ({}): {}", codeHttp, msg);
-                                            throw new TransientHttpException(
-                                                    "Error recuperable: " + codeHttp + " - " + msg);
-                                        }
-
-                                        LOG.warn(" Respuesta inesperada: {}", body);
-                                        return ResultadoActualizacion.fallido(
-                                                "Respuesta inesperada: " + codeHttp + " - " + msg,
-                                                String.valueOf(codeHttp),
-                                                requestBody);
-
-                                    } catch (TransientHttpException e) {
-                                        throw e;
-                                    } catch (Exception e) {
-                                        LOG.error("Error parseando respuesta JSON: {}", e.getMessage());
-                                        return ResultadoActualizacion.fallido(
-                                                "Error al parsear la respuesta del servicio",
-                                                "998",
-                                                requestBody);
-                                    }
-                                });
-                    })
-
-                    .timeout(Duration.ofMillis(timeoutMs))
-                    .retryWhen(retrySpec)
-                    .block();
-
+            String token = getValidToken();
+            ResultadoActualizacion resultado = executeRequest(requestBody, token);
             c.output(resultado);
-
         } catch (WebClientRequestException ex) {
-
-            LOG.error("Error de conexión  para el pedido: {}.", requestBody.getCustomerOrderID(), ex);
-            throw new RuntimeException("Error de infraestructura irrecuperable al contactar el endpoint. Causa: " + ex.getMessage(), ex);
-
+            assert requestBody != null;
+            handleConnectionError(ex, requestBody);
         } catch (Exception e) {
-            LOG.error("Error inesperado  procesando el pedido: {}", requestBody.getCustomerOrderID(), e);
-            throw new RuntimeException("Error inesperado en el DoFn. Causa: " + e.getMessage(), e);
+            assert requestBody != null;
+            handleUnexpectedError(e, requestBody);
         }
     }
+
+
+    private ResultadoActualizacion executeRequest(ActualizarStatusPedidoRefactorRequest requestBody, String token) {
+        return webClient.post()
+                .uri(url)
+                .header("Authorization", "Bearer " + token)
+                .contentType(MediaType.APPLICATION_JSON)
+                .accept(MediaType.APPLICATION_JSON)
+                .bodyValue(requestBody)
+                .exchangeToMono(response -> response.bodyToMono(String.class)
+                        .doOnNext(body -> LOG.info("Body recibido del servicio: {}", body))
+                        .map(body -> parseResponse(body, requestBody))
+                )
+                .timeout(Duration.ofMillis(timeoutMs))
+                .retryWhen(retrySpec)
+                .block();
+    }
+
+
+    private ResultadoActualizacion parseResponse(String body, ActualizarStatusPedidoRefactorRequest requestBody) {
+        try {
+            JsonNode root = mapper.readTree(body);
+            JsonNode metaNode = root.path("Response").path("meta");
+            if (metaNode.isMissingNode() || metaNode.isNull()) {
+                metaNode = root.path("meta");
+            }
+
+            if (metaNode.isMissingNode() || metaNode.isNull()) {
+                return ResultadoActualizacion.fallido("Respuesta sin campo meta", "999", requestBody);
+            }
+
+            int codeHttp = metaNode.path("codeHttp").asInt();
+            int codeService = metaNode.path("codeService").asInt();
+            String msg = metaNode.path("messageService").asText();
+
+            return evaluateResponse(codeHttp, codeService, msg, body, requestBody);
+
+        } catch (TransientHttpException e) {
+            throw e;
+        } catch (Exception e) {
+            LOG.error("Error parseando respuesta JSON: {}", e.getMessage());
+            return ResultadoActualizacion.fallido("Error al parsear la respuesta del servicio", "998", requestBody);
+        }
+    }
+
+
+    private ResultadoActualizacion evaluateResponse(int codeHttp, int codeService, String msg, String body,
+                                                    ActualizarStatusPedidoRefactorRequest requestBody) {
+
+        if (codeHttp == 200 && codeService == 0) {
+            LOG.info("Éxito: {}", msg);
+            return ResultadoActualizacion.exitoso(msg, requestBody);
+        }
+
+        if (codeHttp == 404 || codeService == 104) {
+            LOG.info("️Recurso no encontrado 404: {}", msg);
+            return ResultadoActualizacion.fallido(msg, String.valueOf(codeService), requestBody);
+        }
+
+        if (codeHttp >= 400 && codeHttp < 500) {
+            LOG.warn("Error controlado ({}): {}", codeService, msg);
+            return ResultadoActualizacion.fallido(msg, String.valueOf(codeService), requestBody);
+        }
+
+        if (codeHttp >= 500 || codeHttp == 429) {
+            LOG.error("Error recuperable ({}): {}", codeHttp, msg);
+            throw new TransientHttpException("Error recuperable: " + codeHttp + " - " + msg);
+        }
+
+        LOG.warn("Respuesta inesperada: {}", body);
+        return ResultadoActualizacion.fallido("Respuesta inesperada: " + codeHttp + " - " + msg,
+                String.valueOf(codeHttp), requestBody);
+    }
+
+
+    private void handleConnectionError(WebClientRequestException ex, ActualizarStatusPedidoRefactorRequest requestBody) {
+        LOG.error("Error de conexión para el pedido: {}", requestBody.getCustomerOrderID(), ex);
+        throw new OrderUpdateException(
+                "Error de infraestructura irrecuperable al contactar el endpoint.",
+                requestBody.getCustomerOrderID(),
+                OrderUpdateException.ErrorType.CONNECTION,
+                ex
+        );
+    }
+
+    private void handleUnexpectedError(Exception e, ActualizarStatusPedidoRefactorRequest requestBody) {
+        LOG.error("Error inesperado procesando el pedido: {}", requestBody.getCustomerOrderID(), e);
+        throw new OrderUpdateException(
+                "Error inesperado en el DoFn.",
+                requestBody.getCustomerOrderID(),
+                OrderUpdateException.ErrorType.UNEXPECTED,
+                e
+        );
+    }
+
+
 }
