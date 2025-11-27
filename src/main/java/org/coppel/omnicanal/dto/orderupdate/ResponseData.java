@@ -14,7 +14,7 @@ import java.io.Serializable;
 @AllArgsConstructor
 @ToString
 @JsonIgnoreProperties(ignoreUnknown = true)
-public class ResponseData<T> implements Serializable {
+public class ResponseData<T extends Serializable> implements Serializable {
   private Meta meta;
   private T data;
 }

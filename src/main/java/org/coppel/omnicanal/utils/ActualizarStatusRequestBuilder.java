@@ -61,7 +61,6 @@ public class ActualizarStatusRequestBuilder {
                     item.setItemID(getPartNumber(lineItem.getSku()));
                     item.setCustomerOrderItemID(Long.parseLong(lineItem.getSku()));
                     item.setItemStatus(getItemStates(lineItem));
-                   // item.setItemQuantity(lineItem.getOrderedItemQuantity());
                     return item;
                 })
                 .collect(Collectors.toList());

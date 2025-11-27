@@ -1,6 +1,7 @@
 package org.coppel.omnicanal.dto.partyidentity;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import com.google.gson.Gson;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -16,10 +17,14 @@ import java.io.Serializable;
 @Setter
 @DefaultCoder(AvroCoder.class)
 public class TokenResponse implements Serializable {
-    private String token_type;
-    private int expires_in;
-    private int ext_expires_in;
-    private String access_token;
+    @JsonProperty("token_type")
+    private String type;
+    @JsonProperty("expires_in")
+    private int expiresIn;
+    @JsonProperty("ext_expires_in")
+    private int extExpiresIn;
+    @JsonProperty("access_token")
+    private String accessT;
 
 
     public String toJson(){return new Gson().toJson(this);}

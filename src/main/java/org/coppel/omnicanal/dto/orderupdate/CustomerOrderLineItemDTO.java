@@ -21,6 +21,5 @@ public class CustomerOrderLineItemDTO implements Serializable {
     private String itemID;
     @JsonProperty("ItemStatus")
     private List<ItemStatus> itemStatus;
-    //@JsonProperty("ItemQuantity")
-   // private int itemQuantity;
+
 }

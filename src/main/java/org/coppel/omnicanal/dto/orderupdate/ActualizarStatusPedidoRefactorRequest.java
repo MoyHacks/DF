@@ -1,6 +1,7 @@
 package org.coppel.omnicanal.dto.orderupdate;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.google.gson.Gson;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
@@ -41,5 +42,6 @@ public class ActualizarStatusPedidoRefactorRequest implements Serializable {
   @JsonProperty("CustomerOrdersStatusUpdate")
   private CustomerOrdersStatusUpdateRequest customerOrdersStatusUpdate;
 
+  public String toJson(){return new Gson().toJson(this);}
 
 }

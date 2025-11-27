@@ -2,6 +2,7 @@ package org.coppel.omnicanal.dto.message;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.google.gson.Gson;
 import lombok.Data;
 import org.apache.beam.sdk.coders.DefaultCoder;
 import org.apache.beam.sdk.extensions.avro.coders.AvroCoder;
@@ -53,7 +54,7 @@ public class CustomerOrder implements Serializable {
     private String telephoneNumberCellPhone;
 
     @JsonProperty("emailAddress")
-    private String emailAddress;
+    private String correo;
 
     @JsonProperty("orgId")
     private String orgId;
@@ -72,4 +73,6 @@ public class CustomerOrder implements Serializable {
 
     @JsonProperty("customerOrderProductLineItem")
     private List<CustomerOrderProductLineItem> customerOrderProductLineItem;
+
+    public String toJson(){return new Gson().toJson(this);}
 }
