@@ -27,13 +27,6 @@
     "statusName": "Entregado",
     "statusTracking": "Entregado"
   },
-  "5": {
-    "status": 0,
-    "statusProduct": 0,
-    "statusNameProduct": "",
-    "statusName": "",
-    "statusTracking": ""
-  },
   "6": {
     "status": 7,
     "statusProduct": 7,

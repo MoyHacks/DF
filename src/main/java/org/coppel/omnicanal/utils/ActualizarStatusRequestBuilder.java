@@ -27,25 +27,30 @@ public class ActualizarStatusRequestBuilder {
 
     public ActualizarStatusPedidoRefactorRequest build() {
         ActualizarStatusPedidoRefactorRequest request = new ActualizarStatusPedidoRefactorRequest();
-        List<CustomerOrderLineItems> ropaItems = getCustomerOrderLineItems();
-        if (ropaItems.isEmpty()) {
-            setNotValid(request);
-            return request;
-        }
-        StatusDetail statusDetail = statusCatalog.get(String.valueOf(this.order.getCustomerOrderStateCode().getCode()));
-        request.setCustomerOrderID(this.order.getCustomerOrderID());
-        request.setCustomerID(Long.valueOf(this.order.getCustomerID()));
-        request.setStatusCode(statusDetail.getStatus());
-        request.setTypeUpdate(2);
-        request.setCustomerOrderLineItems(ropaItems);
-        CustomerOrdersStatusUpdateRequest orderstatus = new CustomerOrdersStatusUpdateRequest();
-            GeneralRequest generalRequest = new GeneralRequest((long) this.order.getCustomerOrderStateCode().getCode(),(long)0);
-            orderstatus.setCustomerOrder(new CustomerOrderRequest(this.order.getCustomerOrderID(),generalRequest));
-            orderstatus.setEventDetail( getEventDetail(statusDetail));
-            orderstatus.setEventCatalog( new EventCatalogRequest(1,"di-com-statusUpdate","Update Status","OMS","1.0",fechaActual()));
+        try {
+            StatusDetail statusDetail = statusCatalog.get(String.valueOf(this.order.getCustomerOrderStateCode().getCode()));
+            List<CustomerOrderLineItems> ropaItems = getCustomerOrderLineItems();
+            if (ropaItems.isEmpty() || statusDetail == null) {
+                setNotValid(request);
+                return request;
+            }
+            request.setCustomerOrderID(this.order.getCustomerOrderID());
+            request.setCustomerID(Long.valueOf(this.order.getCustomerID()));
+            request.setStatusCode(statusDetail.getStatus());
+            request.setTypeUpdate(2);
+            request.setCustomerOrderLineItems(ropaItems);
+            CustomerOrdersStatusUpdateRequest orderstatus = new CustomerOrdersStatusUpdateRequest();
+            GeneralRequest generalRequest = new GeneralRequest((long) this.order.getCustomerOrderStateCode().getCode(), (long) 0);
+            orderstatus.setCustomerOrder(new CustomerOrderRequest(this.order.getCustomerOrderID(), generalRequest));
+            orderstatus.setEventDetail(getEventDetail(statusDetail));
+            orderstatus.setEventCatalog(new EventCatalogRequest(1, "di-com-statusUpdate", "Update Status", "OMS", "1.0", fechaActual()));
             orderstatus.setEventDetailLineItem(getEventDetailLineItems());
-        request.setCustomerOrdersStatusUpdate(orderstatus);
-        return request;
+            request.setCustomerOrdersStatusUpdate(orderstatus);
+            return request;
+        }catch(Exception e){
+             setNotValid(request);
+             return request;
+        }
     }
 
     private EventDetailRequest getEventDetail(StatusDetail statusDetail){
@@ -56,6 +61,7 @@ public class ActualizarStatusRequestBuilder {
     private EventDetailLineItem getEventDetailLineItems(){
         List<CustomerOrderLineItemDTO>  data = this.order.getCustomerOrderLineItem()
                 .stream()
+                .filter(lineItem -> lineItem.getSku().length() == 9)
                 .map(lineItem -> {
                     CustomerOrderLineItemDTO item = new CustomerOrderLineItemDTO();
                     item.setItemID(getPartNumber(lineItem.getSku()));
@@ -83,17 +89,30 @@ public class ActualizarStatusRequestBuilder {
         return this.order.getCustomerOrderLineItem()
                 .stream()
                 .filter(lineItem -> lineItem.getSku().length() == 9)
+                .filter(lineItem -> {
+                    int status = getStatusCatalog(String.valueOf(lineItem.getCustomerOrderLineItemStateCode().getCode()));
+                    return status != 0;
+                })
                 .map(lineItem -> {
+                    int status = getStatusCatalog(String.valueOf(lineItem.getCustomerOrderLineItemStateCode().getCode()));
                     CustomerOrderLineItems item = new CustomerOrderLineItems();
                     item.setAreaItem(getArea(lineItem.getSku()));
                     item.setCodeRegisterID(lineItem.getCustomerOrderLineItemSequenceNumber());
                     item.setSizeItem(getSize(lineItem.getSku()));
                     item.setCustomerOrderItemID(getSku(lineItem.getSku()));
                     item.setQuantityItem(lineItem.getOrderedItemQuantity());
-                    item.setStatusCodeItem(statusCatalog.get(String.valueOf(lineItem.getCustomerOrderLineItemStateCode().getCode())).getStatusProduct());
+                    item.setStatusCodeItem(status);
                     return item;
                 })
                 .collect(Collectors.toList());
+    }
+
+    public int getStatusCatalog(String id){
+        try{
+            return statusCatalog.get(id).getStatusProduct();
+        } catch (Exception e) {
+            return 0;
+        }
     }
 
     public String fechaActual() {
@@ -132,7 +151,9 @@ public class ActualizarStatusRequestBuilder {
 
     public void setNotValid(ActualizarStatusPedidoRefactorRequest request){
         request.setStatusCode(-1);
-        request.setCustomerOrderID(this.order.getCustomerOrderID());
+        request.setCustomerOrderID(
+                this.order.getCustomerOrderID() != null ? this.order.getCustomerOrderID() : 0
+        );
         request.setTypeUpdate(0);
         request.setCustomerID(0L);
         request.setCustomerOrderLineItems(Collections.emptyList());

@@ -14,9 +14,7 @@ import org.apache.beam.sdk.extensions.gcp.options.GcpOptions;
 import org.apache.beam.sdk.io.gcp.pubsub.PubsubIO;
 import org.apache.beam.sdk.options.*;
 import org.apache.beam.sdk.transforms.*;
-import org.apache.beam.sdk.values.PCollection;
-import org.apache.beam.sdk.values.PCollectionList;
-import org.apache.beam.sdk.values.TypeDescriptor;
+import org.apache.beam.sdk.values.*;
 import org.coppel.omnicanal.client.ActualizarStatusDoFn;
 import org.coppel.omnicanal.client.ResultadoActualizacion;
 import org.coppel.omnicanal.dto.orderupdate.ActualizarStatusPedidoRefactorRequest;
@@ -32,6 +30,9 @@ import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.Map;
 import java.util.Objects;
+
+import static org.coppel.omnicanal.parser.ParseJsonToDtoFn.EXITO_TAG;
+import static org.coppel.omnicanal.parser.ParseJsonToDtoFn.FALLO_TAG;
 
 public class PubSubToApiPipeline {
 
@@ -174,27 +175,29 @@ public class PubSubToApiPipeline {
             Pipeline p = Pipeline.create(options);
 
 
-            PCollection<ActualizarStatusPedidoRefactorRequest> dtos =
-                    p.apply("1. Leer Mensajes de Pub/Sub",
-                                    PubsubIO.readStrings().fromSubscription(options.getInputSubscription()))
-                            .apply("2. Convertir JSON a DTO",
-                                    ParDo.of(new ParseJsonToDtoFn(catalog)));
+            PCollectionTuple conversionTuple = p.apply("1. Leer Mensajes",
+                            PubsubIO.readStrings().fromSubscription(options.getInputSubscription()))
+                    .apply("2. Convertir y Validar", ParDo.of(new ParseJsonToDtoFn(catalog))
+                            .withOutputTags(EXITO_TAG, TupleTagList.of(FALLO_TAG)));
+
+            PCollection<ActualizarStatusPedidoRefactorRequest> success = conversionTuple.get(EXITO_TAG);
+            PCollection<ActualizarStatusPedidoRefactorRequest> errors = conversionTuple.get(FALLO_TAG);
 
             PCollection<ActualizarStatusPedidoRefactorRequest> validos =
-                    dtos.apply("Filtrar requests válidos",
+                    success.apply("Filtrar requests válidos",
                             Filter.by(req -> req != null &&
                                     req.getCustomerOrderLineItems() != null &&
                                     !req.getCustomerOrderLineItems().isEmpty()));
 
             PCollection<ResultadoActualizacion> sinRopa =
-                    dtos.apply("Filtrar requests sin ropa",
+                    errors.apply("Filtrar requests sin ropa",
                                     Filter.by(req -> req == null ||
                                             req.getCustomerOrderLineItems() == null ||
                                             req.getCustomerOrderLineItems().isEmpty()))
                             .apply("Mapear a ResultadoActualizacion",
                                     MapElements.into(TypeDescriptor.of(ResultadoActualizacion.class))
                                             .via(req -> ResultadoActualizacion.fallido(
-                                                    "Orden sin artículos de ropa",
+                                                    "Orden sin status o artículos de ropa validos",
                                                     "NO_ROPA",
                                                     req)));
 
